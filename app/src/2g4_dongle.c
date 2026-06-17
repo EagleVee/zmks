@@ -15,12 +15,62 @@
 #include <zmk/usb_hid.h>
 #include <zmk/2g4_protocol.h>
 #include <zmk/2g4_crypto.h>
+#include <zmk/event_manager.h>
 
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 #include <zmk/hid_indicators_types.h>
-#include <zmk/event_manager.h>
 #include <zmk/events/hid_indicators_changed.h>
 #endif
+
+#if IS_ENABLED(CONFIG_ZMK_WPM)
+#include <dt-bindings/zmk/hid_usage_pages.h>
+#include <zmk/events/keycode_state_changed.h>
+
+/* Track previous keyboard body to detect key-release transitions for WPM */
+static struct zmk_hid_keyboard_report_body dongle_prev_kb_body;
+
+static void dongle_raise_key_release_events(
+    const struct zmk_hid_keyboard_report_body *old_body,
+    const struct zmk_hid_keyboard_report_body *new_body) {
+
+    int64_t ts = k_uptime_get();
+
+    /* Modifier releases: bit was set in old, cleared in new */
+    uint8_t released_mods = old_body->modifiers & ~new_body->modifiers;
+    for (int bit = 0; bit < 8; bit++) {
+        if (released_mods & BIT(bit)) {
+            raise_zmk_keycode_state_changed((struct zmk_keycode_state_changed){
+                .usage_page = HID_USAGE_KEY,
+                .keycode = 0xE0 + bit,
+                .state = false,
+                .timestamp = ts,
+            });
+        }
+    }
+
+    /* Regular key releases: keycode present in old, absent in new */
+    for (int i = 0; i < ARRAY_SIZE(old_body->keys); i++) {
+        if (old_body->keys[i] == 0) {
+            continue;
+        }
+        bool still_pressed = false;
+        for (int j = 0; j < ARRAY_SIZE(new_body->keys); j++) {
+            if (new_body->keys[j] == old_body->keys[i]) {
+                still_pressed = true;
+                break;
+            }
+        }
+        if (!still_pressed) {
+            raise_zmk_keycode_state_changed((struct zmk_keycode_state_changed){
+                .usage_page = HID_USAGE_KEY,
+                .keycode = old_body->keys[i],
+                .state = false,
+                .timestamp = ts,
+            });
+        }
+    }
+}
+#endif /* CONFIG_ZMK_WPM */
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -94,7 +144,14 @@ static void process_rx_payload(const struct zmk_esb_payload *rx) {
     case ZMK_2G4_MSG_KEYBOARD_REPORT: {
         struct zmk_hid_keyboard_report *report = zmk_hid_get_keyboard_report();
         size_t body_len = MIN(dec_len - 1, sizeof(report->body));
+#if IS_ENABLED(CONFIG_ZMK_WPM)
+        struct zmk_hid_keyboard_report_body old_body;
+        memcpy(&old_body, &report->body, sizeof(old_body));
+#endif
         memcpy(&report->body, &buf[1], body_len);
+#if IS_ENABLED(CONFIG_ZMK_WPM)
+        dongle_raise_key_release_events(&old_body, &report->body);
+#endif
         if (usb_suspended && report_is_release(&buf[1], body_len)) {
             break;
         }
