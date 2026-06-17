@@ -10,10 +10,12 @@
 #include <zephyr/device.h>
 #include <drivers/behavior.h>
 #include <zephyr/logging/log.h>
-#include <zmk/battery.h>
 #include <zmk/event_manager.h>
-#include <zmk/events/battery_state_changed.h>
 #include <zmk/events/underglow_color_changed.h>
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+#include <zmk/battery.h>
+#include <zmk/events/battery_state_changed.h>
+#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -37,12 +39,15 @@ static int underglow_battery_process(struct zmk_behavior_binding *binding,
     const struct underglow_battery_config *config = dev->config;
     struct underglow_battery_data *data = dev->data;
     data->layers |= BIT(event.layer);
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     int bat = zmk_battery_state_of_charge();
-
     if (bat >= config->threshold)
         return binding->param2;
     else
         return binding->param1;
+#else
+    return binding->param2;
+#endif
 }
 
 static const struct behavior_driver_api underglow_battery_driver_api = {
@@ -53,6 +58,7 @@ static const struct behavior_driver_api underglow_battery_driver_api = {
 #endif // IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
 };
 
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
 static int underglow_battery_listener(const zmk_event_t *eh);
 
 ZMK_LISTENER(behavior_underglow_battery, underglow_battery_listener);
@@ -64,6 +70,7 @@ static int underglow_battery_listener(const zmk_event_t *eh) {
 
     return ZMK_EV_EVENT_BUBBLE;
 }
+#endif
 
 #define KP_INST(n)                                                                                 \
     static struct underglow_battery_config underglow_battery_config_##n = {                        \
