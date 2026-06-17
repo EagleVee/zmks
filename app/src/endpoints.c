@@ -187,17 +187,21 @@ static int switch_radio_transport(enum zmk_transport new_transport) {
     int ret = 0;
 
     if (new_transport == ZMK_TRANSPORT_2G4) {
+        LOG_INF("Radio switch → 2G4: calling zmk_ble_stop");
         ret = zmk_ble_stop();
         if (ret) {
             LOG_ERR("BLE stop failed: %d", ret);
             goto done;
         }
+        LOG_INF("Radio switch → 2G4: BLE stopped, settling %dms", RADIO_SWITCH_SETTLE_MS);
         k_msleep(RADIO_SWITCH_SETTLE_MS);
+        LOG_INF("Radio switch → 2G4: calling zmk_2g4_start");
         ret = zmk_2g4_start();
         if (ret) {
             LOG_ERR("2.4G start failed: %d", ret);
             goto done;
         }
+        LOG_INF("Radio switch → 2G4: done");
     } else if (new_transport == ZMK_TRANSPORT_BLE) {
         zmk_2g4_stop();
         ret = zmk_ble_start();
@@ -245,6 +249,7 @@ static int apply_wireless_transport(enum zmk_transport transport) {
 #endif
 
 int zmk_endpoints_select_transport(enum zmk_transport transport) {
+    LOG_INF("select_transport: %d", transport);
     LOG_DBG("Selected endpoint transport %d", transport);
 
 #if IS_ENABLED(CONFIG_ZMK_BLE) && IS_ENABLED(CONFIG_ZMK_2G4)

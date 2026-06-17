@@ -715,7 +715,9 @@ int zmk_ble_stop(void) {
     advertising_status = ZMK_ADV_NONE;
 
 #if IS_ENABLED(CONFIG_ZMK_2G4)
+    LOG_INF("BLE stop: calling bt_disable");
     int ret = bt_disable();
+    LOG_INF("BLE stop: bt_disable returned %d", ret);
     if (ret) {
         LOG_ERR("bt_disable failed: %d", ret);
     }
