@@ -16,6 +16,7 @@
 #include <zmk/2g4_protocol.h>
 #include <zmk/2g4_crypto.h>
 #include <zmk/event_manager.h>
+#include <zmk/events/dongle_link_state_changed.h>
 
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 #include <zmk/hid_indicators_types.h>
@@ -88,12 +89,15 @@ static uint32_t rx_total;
 static uint32_t rx_decrypt_fail;
 static struct k_work_delayable kb_lost_work;
 
+bool zmk_dongle_link_is_connected(void) { return kb_connected; }
+
 static void kb_lost_handler(struct k_work *work) {
     if (!kb_connected) {
         return;
     }
     kb_connected = false;
     LOG_INF("2.4G keyboard lost (rx_total=%u, decrypt_fail=%u)", rx_total, rx_decrypt_fail);
+    raise_zmk_dongle_link_state_changed((struct zmk_dongle_link_state_changed){.connected = false});
 
     if (zmk_usb_get_status() == USB_DC_SUSPEND) {
         return;
@@ -124,6 +128,8 @@ static void process_rx_payload(const struct zmk_esb_payload *rx) {
     if (!kb_connected) {
         kb_connected = true;
         LOG_INF("2.4G keyboard connected (rf_len=%u, total=%u)", rx->length, rx_total);
+        raise_zmk_dongle_link_state_changed(
+            (struct zmk_dongle_link_state_changed){.connected = true});
     }
     k_work_reschedule(&kb_lost_work, K_MSEC(ZMK_2G4_KB_TIMEOUT_MS));
 

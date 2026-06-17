@@ -36,4 +36,10 @@ config ZMK_WIDGET_WPM_STATUS
     select LV_USE_LABEL
     select ZMK_WPM
 
+
+config ZMK_WIDGET_DONGLE_LINK_STATUS
+    bool "Widget showing 2.4G ESB link status on dongle"
+    depends on ZMK_2G4_DONGLE
+    select LV_USE_LABEL
 endmenu
+
