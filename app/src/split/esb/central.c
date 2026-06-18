@@ -24,6 +24,11 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+/* Forward declaration — esb_central is defined below via
+ * ZMK_SPLIT_TRANSPORT_CENTRAL_REGISTER, but zmk_esb_split_central_on_rx
+ * needs &esb_central before that point. */
+extern struct zmk_split_transport_central esb_central;
+
 /* ── State ─────────────────────────────────────────────────────────────────── */
 
 static bool available; /* true while the 2G4 ESB hub is running */
