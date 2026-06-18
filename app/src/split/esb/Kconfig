@@ -5,7 +5,7 @@ if ZMK_SPLIT
 
 config ZMK_SPLIT_ESB
     bool "ESB Split"
-    depends on ZMK_ESB
+    select ZMK_ESB
     help
       Enable ESB-based split transport so peripheral halves (right, num) can
       communicate with the central (left) via 2.4 GHz ESB instead of BLE.
