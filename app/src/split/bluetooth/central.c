@@ -1273,7 +1273,8 @@ static struct zmk_split_transport_status split_central_bt_get_status() {
     }
 
     return (struct zmk_split_transport_status){
-        .available = !IS_ENABLED(CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START) && settings_loaded,
+        .available = !IS_ENABLED(CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START) && settings_loaded &&
+                     zmk_ble_is_started(),
         .enabled = is_enabled,
         .connections = conn_status,
     };

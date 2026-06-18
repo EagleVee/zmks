@@ -44,6 +44,7 @@ int zmk_ble_unpair_all(void);
 
 int zmk_ble_set_device_name(char *name);
 
+bool zmk_ble_is_started(void);
 int zmk_ble_start(void);
 int zmk_ble_stop(void);
 

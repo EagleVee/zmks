@@ -706,6 +706,8 @@ static void disconnect_conn_cb(struct bt_conn *conn, void *data) {
     bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 }
 
+bool zmk_ble_is_started(void) { return ble_started; }
+
 int zmk_ble_stop(void) {
     if (!ble_started) {
         return 0;
