@@ -1,0 +1,109 @@
+# Copyright (c) 2026 Team PHDesign
+# SPDX-License-Identifier: MIT
+
+if ZMK_SPLIT
+
+config ZMK_SPLIT_ESB
+    bool "ESB Split"
+    depends on ZMK_ESB
+    help
+      Enable ESB-based split transport so peripheral halves (right, num) can
+      communicate with the central (left) via 2.4 GHz ESB instead of BLE.
+      On the central this time-multiplexes the radio: PRX by default to collect
+      peripheral key events, briefly switching to PTX to send HID reports to the
+      dongle.  On each peripheral the device transmits key events as ESB PTX.
+
+if ZMK_SPLIT_ESB
+
+config ZMK_SPLIT_ESB_PRIORITY
+    int "ESB split transport priority"
+    default 2
+    help
+      Transport selection priority. Lower number = higher priority.
+      BLE split defaults to 1, so 2 makes ESB the fallback: peripherals use BLE
+      normally and automatically switch to ESB when BLE drops (i.e. when the
+      central switches to dongle mode and calls bt_disable).
+
+if ZMK_SPLIT_ROLE_CENTRAL
+
+config ZMK_SPLIT_ESB_CENTRAL_PERIPHERALS
+    int "Number of peripheral halves connecting via ESB split"
+    default 1
+    help
+      How many peripheral halves (right, num, …) send key events to the central
+      over ESB.  Each gets its own ESB pipe starting at PIPE_OFFSET.
+
+endif # ZMK_SPLIT_ROLE_CENTRAL
+
+if !ZMK_SPLIT_ROLE_CENTRAL
+
+config ZMK_SPLIT_ESB_PERIPHERAL_INDEX
+    int "This peripheral's zero-based ESB pipe index"
+    default 0
+    help
+      0 = first peripheral (right), 1 = second peripheral (num), …
+      The actual ESB pipe used is PIPE_OFFSET + PERIPHERAL_INDEX.
+
+endif # !ZMK_SPLIT_ROLE_CENTRAL
+
+config ZMK_SPLIT_ESB_PIPE_OFFSET
+    int "First ESB pipe reserved for split peripherals"
+    default 1
+    help
+      Pipe 0 is reserved for the dongle HID link.  Split peripheral pipes start
+      at this offset (1 = pipe 1 for index 0, pipe 2 for index 1, …).
+
+# ── Shared address config (must match on central AND all peripherals) ─────────
+
+config ZMK_SPLIT_ESB_ADDR_BASE_0
+    hex "Split ESB base address byte 0 (MSB)"
+    default 0xE7
+
+config ZMK_SPLIT_ESB_ADDR_BASE_1
+    hex "Split ESB base address byte 1"
+    default 0xE7
+
+config ZMK_SPLIT_ESB_ADDR_BASE_2
+    hex "Split ESB base address byte 2"
+    default 0xE7
+
+config ZMK_SPLIT_ESB_ADDR_BASE_3
+    hex "Split ESB base address byte 3 (LSB)"
+    default 0xE7
+
+config ZMK_SPLIT_ESB_PIPE_PREFIX_0
+    hex "ESB prefix byte for peripheral index 0 (right)"
+    default 0xC2
+
+config ZMK_SPLIT_ESB_PIPE_PREFIX_1
+    hex "ESB prefix byte for peripheral index 1 (num)"
+    default 0xC3
+
+# ── RF settings (peripheral PTX side; must match dongle channel) ─────────────
+
+config ZMK_SPLIT_ESB_RF_CHANNEL
+    int "RF channel for ESB split link (0-100)"
+    default 2
+    help
+      Must match CONFIG_ZMK_2G4_RF_CHANNEL used by the central and dongle.
+
+config ZMK_SPLIT_ESB_TX_POWER
+    int "TX power for ESB split link (dBm)"
+    default 8
+
+# ── Retransmit tuning (peripheral PTX side) ───────────────────────────────────
+
+config ZMK_SPLIT_ESB_RETRANSMIT_DELAY
+    int "Microseconds between ESB retransmit attempts on peripheral"
+    default 600
+    help
+      Must be >= 500 µs.  10 retries × 600 µs = 6 ms max retry window, enough
+      to survive the central's brief PTX window when sending to the dongle.
+
+config ZMK_SPLIT_ESB_RETRANSMIT_COUNT
+    int "Maximum ESB retransmit attempts on peripheral"
+    default 10
+
+endif # ZMK_SPLIT_ESB
+
+endif # ZMK_SPLIT

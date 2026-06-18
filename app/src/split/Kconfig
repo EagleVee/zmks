@@ -34,3 +34,4 @@ endif # ZMK_SPLIT
 
 rsource "bluetooth/Kconfig"
 rsource "wired/Kconfig"
+rsource "esb/Kconfig"
