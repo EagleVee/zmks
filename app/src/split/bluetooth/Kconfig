@@ -110,11 +110,13 @@ config ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT
 
 config ZMK_SPLIT_BLE_RETRY_TIMEOUT
     int "Seconds between BLE retry attempts after the transport gave up"
-    default 10
+    default 3
     help
       After giving up, the transport retries being available after this many
       seconds.  This lets the selector fall back to BLE if the central later
-      returns to BLE mode.
+      returns to BLE mode.  Keep this shorter than ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT
+      so num cycles through BLE advertising windows frequently enough for the
+      left side to reconnect after a mode switch.
 
 endif # !ZMK_SPLIT_ROLE_CENTRAL
 

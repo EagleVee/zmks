@@ -182,10 +182,12 @@ static int esb_peripheral_set_enabled(bool en) {
         LOG_INF("ESB split peripheral %d started", CONFIG_ZMK_SPLIT_ESB_PERIPHERAL_INDEX);
     } else {
         k_work_cancel_delayable(&retry_work);
+        k_work_cancel_delayable(&esb_avail_work);
         zmk_esb_flush_tx();
         zmk_esb_disable();
         connected = false;
         pending = false;
+        esb_available = false;
         LOG_INF("ESB split peripheral %d stopped", CONFIG_ZMK_SPLIT_ESB_PERIPHERAL_INDEX);
     }
 
@@ -249,8 +251,15 @@ static int esb_ble_status_listener(const zmk_event_t *eh) {
             notify_status();
         }
     } else {
-        k_work_reschedule(&esb_avail_work,
-                          K_MSEC((CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT + 1) * 1000));
+        /* Only schedule if ESB is not already available and no timer is already
+         * queued.  ble_give_up_cb fires a second connected=false event at
+         * GIVE_UP_TIMEOUT seconds; without this guard it would reset the
+         * deadline from T+5 s (set by disconnected()) to T+9 s, delaying ESB
+         * availability by an extra 4 s and creating an enable/disable cycle. */
+        if (!esb_available && !k_work_delayable_is_pending(&esb_avail_work)) {
+            k_work_reschedule(&esb_avail_work,
+                              K_MSEC((CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT + 1) * 1000));
+        }
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
