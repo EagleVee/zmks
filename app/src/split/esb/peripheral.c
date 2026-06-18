@@ -34,6 +34,11 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE)
+#include <zmk/event_manager.h>
+#include <zmk/events/split_peripheral_status_changed.h>
+#endif
+
 BUILD_ASSERT(sizeof(struct zmk_split_transport_peripheral_event) <=
                  CONFIG_ZMK_ESB_MAX_PAYLOAD_LENGTH,
              "zmk_split_transport_peripheral_event does not fit in ESB payload");
@@ -43,11 +48,20 @@ BUILD_ASSERT(sizeof(struct zmk_split_transport_peripheral_event) <=
 static bool enabled;
 static bool connected; /* true after a successful TX to the central */
 
+/* ESB starts unavailable.  It becomes available after BLE gives up
+ * (ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT + 1 s), and goes back to unavailable
+ * the moment BLE reconnects. */
+static bool esb_available = false;
+
 static struct zmk_esb_payload pending_payload;
 static bool pending; /* a serialised event is waiting to be ACKed */
 
 static void retry_work_cb(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(retry_work, retry_work_cb);
+
+static void esb_avail_work_cb(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(esb_avail_work, esb_avail_work_cb);
+
 static zmk_split_transport_peripheral_status_changed_cb_t status_cb;
 
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
@@ -181,7 +195,7 @@ static int esb_peripheral_set_enabled(bool en) {
 
 static struct zmk_split_transport_status esb_peripheral_get_status(void) {
     return (struct zmk_split_transport_status){
-        .available = true,
+        .available = esb_available,
         .enabled = enabled,
         .connections = connected ? ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_ALL_CONNECTED
                                  : ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED,
@@ -215,5 +229,32 @@ static K_WORK_DEFINE(notify_status_work, notify_status_work_cb);
 
 static void notify_status(void) { k_work_submit(&notify_status_work); }
 
-/* Transport selector calls set_enabled(true) when this transport is chosen.
- * No SYS_INIT needed — retry_work is statically initialised above. */
+static void esb_avail_work_cb(struct k_work *work) {
+    esb_available = true;
+    notify_status();
+}
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE)
+/* When BLE connects: ESB is not needed — become unavailable.
+ * When BLE gives up (ble_give_up_cb fires the event with connected=false):
+ * schedule ESB availability 1 second after BLE's own give-up timeout so the
+ * selector has time to see BLE unavailable before ESB becomes the candidate. */
+static int esb_ble_status_listener(const zmk_event_t *eh) {
+    const struct zmk_split_peripheral_status_changed *ev =
+        as_zmk_split_peripheral_status_changed(eh);
+    if (ev->connected) {
+        k_work_cancel_delayable(&esb_avail_work);
+        if (esb_available) {
+            esb_available = false;
+            notify_status();
+        }
+    } else {
+        k_work_reschedule(&esb_avail_work,
+                          K_MSEC((CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT + 1) * 1000));
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(esb_ble_status, esb_ble_status_listener);
+ZMK_SUBSCRIPTION(esb_ble_status, zmk_split_peripheral_status_changed);
+#endif /* CONFIG_ZMK_SPLIT_BLE */

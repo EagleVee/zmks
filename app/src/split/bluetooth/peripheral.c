@@ -75,6 +75,17 @@ static int start_advertising(bool low_duty) {
 static bool low_duty_advertising = false;
 static bool enabled = false;
 
+/* When BLE stays disconnected longer than ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT the
+ * transport reports available=false so the selector can fall back to ESB.
+ * ble_retry_work resets the flag after ZMK_SPLIT_BLE_RETRY_TIMEOUT so the
+ * selector can switch back to BLE if the central returns to BLE mode. */
+static bool ble_gave_up = false;
+
+static void ble_give_up_cb(struct k_work *work);
+static void ble_retry_cb(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(ble_give_up_work, ble_give_up_cb);
+static K_WORK_DELAYABLE_DEFINE(ble_retry_work, ble_retry_cb);
+
 static void advertising_cb(struct k_work *work) {
     const int err = start_advertising(low_duty_advertising);
     if (err < 0) {
@@ -86,6 +97,12 @@ K_WORK_DEFINE(advertising_work, advertising_cb);
 
 static void connected(struct bt_conn *conn, uint8_t err) {
     is_connected = (err == 0);
+
+    if (err == 0) {
+        k_work_cancel_delayable(&ble_give_up_work);
+        k_work_cancel_delayable(&ble_retry_work);
+        ble_gave_up = false;
+    }
 
     raise_zmk_split_peripheral_status_changed(
         (struct zmk_split_peripheral_status_changed){.connected = is_connected});
@@ -111,6 +128,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason) {
     if (enabled) {
         low_duty_advertising = false;
         k_work_submit(&advertising_work);
+        k_work_reschedule(&ble_give_up_work,
+                          K_SECONDS(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT));
     }
 }
 
@@ -171,9 +190,15 @@ static int split_peripheral_bt_set_enabled(bool en) {
 
     enabled = en;
     if (en) {
+        ble_gave_up = false;
+        k_work_cancel_delayable(&ble_retry_work);
+        k_work_reschedule(&ble_give_up_work,
+                          K_SECONDS(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT));
         k_work_submit(&advertising_work);
         return 0;
     } else {
+        k_work_cancel_delayable(&ble_give_up_work);
+        k_work_cancel_delayable(&ble_retry_work);
         struct bt_conn *conn = NULL;
         bt_conn_foreach(BT_CONN_TYPE_LE, find_first_conn, &conn);
         if (conn) {
@@ -199,11 +224,28 @@ static void notify_status_work_cb(struct k_work *_work) { notify_transport_statu
 
 static K_WORK_DEFINE(notify_status_work, notify_status_work_cb);
 
+static void ble_give_up_cb(struct k_work *work) {
+    ble_gave_up = true;
+    k_work_reschedule(&ble_retry_work, K_SECONDS(CONFIG_ZMK_SPLIT_BLE_RETRY_TIMEOUT));
+    /* Fire the status event so ESB peripheral listener can schedule its own
+     * availability timer.  This covers the case where BLE never connected
+     * (no prior disconnected() callback) but the central is in dongle mode. */
+    raise_zmk_split_peripheral_status_changed(
+        (struct zmk_split_peripheral_status_changed){.connected = false});
+    k_work_submit(&notify_status_work);
+}
+
+static void ble_retry_cb(struct k_work *work) {
+    ble_gave_up = false;
+    k_work_submit(&notify_status_work);
+}
+
 static bool settings_loaded = false;
 
 static struct zmk_split_transport_status split_peripheral_bt_get_status(void) {
     return (struct zmk_split_transport_status){
-        .available = !IS_ENABLED(CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START) && settings_loaded,
+        .available = !IS_ENABLED(CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START) && settings_loaded &&
+                     !ble_gave_up,
         .enabled = enabled,
         .connections = zmk_split_bt_peripheral_is_connected()
                            ? ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_ALL_CONNECTED

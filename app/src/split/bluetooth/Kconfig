@@ -100,6 +100,22 @@ config BT_MAX_CONN
 config BT_GAP_AUTO_UPDATE_CONN_PARAMS
     default n
 
+config ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT
+    int "Seconds after disconnect before BLE transport yields to fallback"
+    default 4
+    help
+      When the BLE link drops (or never connects) and this timer elapses the
+      transport reports available=false so the selector can try the next
+      transport (e.g. ESB).  Resets immediately when BLE reconnects.
+
+config ZMK_SPLIT_BLE_RETRY_TIMEOUT
+    int "Seconds between BLE retry attempts after the transport gave up"
+    default 10
+    help
+      After giving up, the transport retries being available after this many
+      seconds.  This lets the selector fall back to BLE if the central later
+      returns to BLE mode.
+
 endif # !ZMK_SPLIT_ROLE_CENTRAL
 
 endmenu
