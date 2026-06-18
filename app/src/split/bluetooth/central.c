@@ -30,6 +30,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/position_state_changed.h>
 #include <zmk/events/sensor_event.h>
 #include <zmk/events/battery_state_changed.h>
+#include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/pointing/input_split.h>
 #include <zmk/hid_indicators_types.h>
 #include <zmk/physical_layouts.h>
@@ -1183,12 +1184,19 @@ SYS_INIT(zmk_split_bt_central_init, APPLICATION, CONFIG_ZMK_BLE_INIT_PRIORITY);
 static int zmk_split_bt_central_listener_cb(const zmk_event_t *eh) {
     if (as_zmk_physical_layout_selection_changed(eh)) {
         k_work_submit(&update_peripherals_selected_layouts_work);
+    } else if (as_zmk_ble_active_profile_changed(eh)) {
+        /* Fired by zmk_ble_ready() → update_advertising() on BLE start and on
+         * zmk_ble_start() after returning to BLE mode.  Re-notifying here
+         * ensures the central transport selector re-evaluates BLE availability
+         * even if finish_init() ran before ble_started was set to true. */
+        notify_transport_status();
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
 
 ZMK_LISTENER(zmk_split_bt_central, zmk_split_bt_central_listener_cb);
 ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_physical_layout_selection_changed);
+ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_ble_active_profile_changed);
 
 static int split_central_bt_send_command(uint8_t source,
                                          struct zmk_split_transport_central_command cmd) {
@@ -1231,19 +1239,24 @@ static int split_central_bt_set_enabled(bool enabled) {
     if (enabled) {
         return start_scanning();
     } else {
-        int err = stop_scanning();
-        if (err < 0) {
-            LOG_WRN("Failed to stop scanning for peripherals (%d)", err);
-        }
-
-        for (int i = 0; i < ZMK_SPLIT_BLE_PERIPHERAL_COUNT; i++) {
-            if (peripherals[i].state != PERIPHERAL_SLOT_STATE_CONNECTED) {
-                continue;
+        /* bt_disable() in zmk_ble_stop() already tears down the BLE stack.
+         * Calling bt_le_scan_stop() or bt_conn_disconnect() after bt_disable()
+         * crashes the firmware, so skip BT API calls when BLE is not running. */
+        if (zmk_ble_is_started()) {
+            int err = stop_scanning();
+            if (err < 0) {
+                LOG_WRN("Failed to stop scanning for peripherals (%d)", err);
             }
 
-            err = bt_conn_disconnect(peripherals[i].conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-            if (err < 0) {
-                LOG_WRN("Failed to disconnect a peripheral (%d)", err);
+            for (int i = 0; i < ZMK_SPLIT_BLE_PERIPHERAL_COUNT; i++) {
+                if (peripherals[i].state != PERIPHERAL_SLOT_STATE_CONNECTED) {
+                    continue;
+                }
+
+                err = bt_conn_disconnect(peripherals[i].conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+                if (err < 0) {
+                    LOG_WRN("Failed to disconnect a peripheral (%d)", err);
+                }
             }
         }
 
