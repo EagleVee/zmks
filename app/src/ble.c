@@ -702,6 +702,10 @@ static void zmk_ble_ready(int err) {
     update_advertising();
 }
 
+static void disconnect_conn_cb(struct bt_conn *conn, void *data) {
+    bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+}
+
 int zmk_ble_stop(void) {
     if (!ble_started) {
         return 0;
@@ -715,6 +719,11 @@ int zmk_ble_stop(void) {
     advertising_status = ZMK_ADV_NONE;
 
 #if IS_ENABLED(CONFIG_ZMK_2G4)
+    /* Cleanly disconnect all BLE peers so split peripherals receive an
+     * immediate disconnect event instead of waiting for the supervision
+     * timeout (~4s) to detect the link loss and switch to ESB split. */
+    bt_conn_foreach(BT_CONN_TYPE_LE, disconnect_conn_cb, NULL);
+
     int ret = bt_disable();
     if (ret) {
         LOG_ERR("bt_disable failed: %d", ret);
