@@ -192,13 +192,23 @@ static int split_peripheral_bt_set_enabled(bool en) {
     if (en) {
         ble_gave_up = false;
         k_work_cancel_delayable(&ble_retry_work);
-        k_work_reschedule(&ble_give_up_work,
-                          K_SECONDS(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT));
+        /* Only start the give-up timer when not already connected.
+         * If the selector calls set_enabled(true) while a BLE connection is
+         * alive (e.g. when switching back from ESB to BLE because BLE already
+         * reconnected), restarting the timer would kick num off BLE 4 s later. */
+        if (!is_connected) {
+            k_work_reschedule(&ble_give_up_work,
+                              K_SECONDS(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT));
+        }
         k_work_submit(&advertising_work);
         return 0;
     } else {
         k_work_cancel_delayable(&ble_give_up_work);
-        k_work_cancel_delayable(&ble_retry_work);
+        /* Do NOT cancel ble_retry_work here.  If ble_gave_up=true when the
+         * selector disables BLE (switching to ESB), the retry work is the only
+         * thing that will eventually reset ble_gave_up=false so BLE can be
+         * reconsidered.  Cancelling it here would lock BLE out permanently
+         * until the next hard reboot. */
         struct bt_conn *conn = NULL;
         bt_conn_foreach(BT_CONN_TYPE_LE, find_first_conn, &conn);
         if (conn) {
