@@ -188,9 +188,9 @@ int zmk_widget_bongo_cat_init(struct zmk_widget_bongo_cat *widget, lv_obj_t *par
     widget->obj = lv_canvas_create(parent);
     lv_canvas_set_buffer(widget->obj, buf, CAT_W, CAT_H, LV_IMG_CF_INDEXED_1BIT);
 
-    /* Palette: index 0 = black (background), index 1 = white (cat) */
-    lv_canvas_set_palette(widget->obj, 0, LV_COLOR_MAKE(0x00, 0x00, 0x00));
-    lv_canvas_set_palette(widget->obj, 1, LV_COLOR_MAKE(0xff, 0xff, 0xff));
+    /* Palette: index 0 = background (off), index 1 = foreground (on) */
+    lv_canvas_set_palette(widget->obj, 0, px_off());
+    lv_canvas_set_palette(widget->obj, 1, px_on());
 
     draw_frame(widget->obj, 0);
 
