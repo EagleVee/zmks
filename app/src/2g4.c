@@ -40,6 +40,14 @@
 #include <zmk/split/esb/central.h>
 #endif
 
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+#include <zmk/battery.h>
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT)
+#include <zmk/split/central.h>
+#endif
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -49,6 +57,9 @@ static struct zmk_esb_payload tx_payload;
 static bool ready;
 static struct k_work_delayable resend_work;
 static struct k_work_delayable keepalive_work;
+static struct k_work_delayable battery_report_work;
+
+#define ZMK_2G4_BATTERY_REPORT_INTERVAL_MS 60000
 
 #define ZMK_2G4_KEEPALIVE_MS 250
 static uint8_t consec_fail_count;
@@ -293,6 +304,56 @@ reschedule:
     k_work_reschedule(&keepalive_work, K_MSEC(ZMK_2G4_KEEPALIVE_MS));
 }
 
+/* ── Battery report ─────────────────────────────────────────────────────────── */
+
+static void battery_report_handler(struct k_work *work) {
+    if (!ready) {
+        return;
+    }
+
+    uint8_t levels[3] = {ZMK_2G4_BATTERY_UNKNOWN, ZMK_2G4_BATTERY_UNKNOWN,
+                         ZMK_2G4_BATTERY_UNKNOWN};
+
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    levels[0] = zmk_battery_state_of_charge();
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
+    /* Peripheral battery levels (best-effort; 0xFF if not yet fetched) */
+    uint8_t peri_level;
+    for (int i = 0; i < 2; i++) {
+        if (zmk_split_central_get_peripheral_battery_level(i, &peri_level) == 0) {
+            levels[i + 1] = peri_level;
+        }
+    }
+#endif
+
+    struct zmk_esb_payload batt = {
+        .pipe = 0,
+        .noack = false,
+        .length = 4,
+    };
+    batt.data[0] = ZMK_2G4_MSG_BATTERY_REPORT;
+    batt.data[1] = levels[0];
+    batt.data[2] = levels[1];
+    batt.data[3] = levels[2];
+
+    int enc_len = zmk_2g4_crypto_encrypt(batt.data, 4, CONFIG_ZMK_ESB_MAX_PAYLOAD_LENGTH);
+    if (enc_len < 0) {
+        goto reschedule;
+    }
+    batt.length = enc_len;
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ESB)
+    hub_enqueue(&batt);
+#else
+    zmk_esb_write_payload(&batt);
+#endif
+
+reschedule:
+    k_work_reschedule(&battery_report_work, K_MSEC(ZMK_2G4_BATTERY_REPORT_INTERVAL_MS));
+}
+
 /* ── Report sending ─────────────────────────────────────────────────────────── */
 
 static void resend_work_handler(struct k_work *work) {
@@ -391,6 +452,7 @@ int zmk_2g4_start(void) {
 
     k_work_init_delayable(&resend_work, resend_work_handler);
     k_work_init_delayable(&keepalive_work, keepalive_handler);
+    k_work_init_delayable(&battery_report_work, battery_report_handler);
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ESB)
     k_work_init(&ptx_window_work, ptx_window_work_cb);
@@ -442,6 +504,8 @@ int zmk_2g4_start(void) {
     ready = true;
     send_boot_announcement();
     k_work_reschedule(&keepalive_work, K_MSEC(ZMK_2G4_KEEPALIVE_MS));
+    /* Send initial battery report shortly after start, then every minute */
+    k_work_reschedule(&battery_report_work, K_MSEC(5000));
 
     return 0;
 }
@@ -454,6 +518,7 @@ int zmk_2g4_stop(void) {
     ready = false;
     k_work_cancel_delayable(&resend_work);
     k_work_cancel_delayable(&keepalive_work);
+    k_work_cancel_delayable(&battery_report_work);
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ESB)
     k_work_cancel(&ptx_window_work);

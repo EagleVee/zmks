@@ -12,6 +12,12 @@
 #if IS_ENABLED(CONFIG_ZMK_WIDGET_DONGLE_LINK_STATUS)
 #include <zmk/display/widgets/dongle_link_status.h>
 #endif
+#if IS_ENABLED(CONFIG_ZMK_WIDGET_BONGO_CAT)
+#include <zmk/display/widgets/bongo_cat.h>
+#endif
+#if IS_ENABLED(CONFIG_ZMK_WIDGET_DONGLE_BATTERY_STATUS)
+#include <zmk/display/widgets/dongle_battery_status.h>
+#endif
 #include <zmk/display/status_screen.h>
 
 #include <zephyr/logging/log.h>
@@ -39,6 +45,14 @@ static struct zmk_widget_wpm_status wpm_status_widget;
 
 #if IS_ENABLED(CONFIG_ZMK_WIDGET_DONGLE_LINK_STATUS)
 static struct zmk_widget_dongle_link_status dongle_link_status_widget;
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_WIDGET_BONGO_CAT)
+static struct zmk_widget_bongo_cat bongo_cat_widget;
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_WIDGET_DONGLE_BATTERY_STATUS)
+static struct zmk_widget_dongle_battery_status dongle_battery_status_widget;
 #endif
 
 lv_obj_t *zmk_display_status_screen() {
@@ -78,5 +92,35 @@ lv_obj_t *zmk_display_status_screen() {
     lv_obj_align(zmk_widget_dongle_link_status_obj(&dongle_link_status_widget), LV_ALIGN_TOP_LEFT,
                  0, 0);
 #endif
+
+    /*
+     * Dongle-specific widgets:
+     *
+     *   DONGLE_BATTERY_STATUS — top-right: "L:85\nR:72\nN:91" in small font
+     *   BONGO_CAT             — bottom-centre: 64×32 animation canvas
+     *
+     * Screen layout (128×64):
+     *   ┌─────────────────────────────────────────────────────┐
+     *   │ [WiFi OK]                          [L:85]           │
+     *   │                                    [R:72]           │
+     *   │                                    [N:91]           │
+     *   │         ┌──── bongo cat 64×32 ────┐                │
+     *   │         │                         │                │
+     *   └─────────────────────────────────────────────────────┘
+     */
+
+#if IS_ENABLED(CONFIG_ZMK_WIDGET_DONGLE_BATTERY_STATUS)
+    zmk_widget_dongle_battery_status_init(&dongle_battery_status_widget, screen);
+    lv_obj_set_style_text_font(zmk_widget_dongle_battery_status_obj(&dongle_battery_status_widget),
+                               lv_theme_get_font_small(screen), LV_PART_MAIN);
+    lv_obj_align(zmk_widget_dongle_battery_status_obj(&dongle_battery_status_widget),
+                 LV_ALIGN_TOP_RIGHT, 0, 0);
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_WIDGET_BONGO_CAT)
+    zmk_widget_bongo_cat_init(&bongo_cat_widget, screen);
+    lv_obj_align(zmk_widget_bongo_cat_obj(&bongo_cat_widget), LV_ALIGN_BOTTOM_MID, 0, 0);
+#endif
+
     return screen;
 }

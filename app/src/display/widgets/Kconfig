@@ -41,5 +41,17 @@ config ZMK_WIDGET_DONGLE_LINK_STATUS
     bool "Widget showing 2.4G ESB link status on dongle"
     depends on ZMK_2G4_DONGLE
     select LV_USE_LABEL
+
+config ZMK_WIDGET_BONGO_CAT
+    bool "Bongo cat animation widget driven by WPM"
+    depends on ZMK_WPM && ZMK_DISPLAY
+    select LV_USE_CANVAS
+    select LV_USE_LABEL
+
+config ZMK_WIDGET_DONGLE_BATTERY_STATUS
+    bool "Dongle battery widget showing L/R/N levels from 2.4G reports"
+    depends on ZMK_2G4_DONGLE
+    select LV_USE_LABEL
+
 endmenu
 

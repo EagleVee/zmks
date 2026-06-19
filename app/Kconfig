@@ -466,6 +466,27 @@ config ZMK_BACKLIGHT_AUTO_OFF_USB
 
 endif # ZMK_BACKLIGHT
 
+config ZMK_STATUS_LED
+    bool "Onboard LED system status indicator (Nice Nano blue LED)"
+    depends on GPIO
+    help
+      Use the onboard blue LED (gpio0 15) as a transport-mode and connection
+      status indicator.
+      Central role: solid = USB, fast-blink = BLE searching, one/two blinks
+      on mode selection.
+      Peripheral role: fast-blink for CONFIG_ZMK_STATUS_LED_PERIPHERAL_BOOT_BLINK_MS
+      on boot to indicate pairing window.
+
+if ZMK_STATUS_LED
+
+config ZMK_STATUS_LED_PERIPHERAL_BOOT_BLINK_MS
+    int "Peripheral boot blink duration in milliseconds"
+    default 30000
+    help
+      How long the peripheral blinks the LED on boot before stopping.
+
+endif # ZMK_STATUS_LED
+
 endmenu # Display/LED Options
 
 rsource "src/pointing/Kconfig"

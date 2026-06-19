@@ -14,6 +14,10 @@
 #define ZMK_2G4_MSG_MOUSE_REPORT 0x03
 #define ZMK_2G4_MSG_SYSTEM_REPORT 0x04
 #define ZMK_2G4_MSG_BOOT 0x05
+/* Battery report: [0x06][level_left][level_right][level_num]
+ * Each level: 0-100 (%), 0xFF = unavailable */
+#define ZMK_2G4_MSG_BATTERY_REPORT 0x06
+#define ZMK_2G4_BATTERY_UNKNOWN 0xFF
 #define ZMK_2G4_MSG_STUDIO_RPC_TX 0x10
 #define ZMK_2G4_MSG_KEEP_ALIVE 0xFE
 

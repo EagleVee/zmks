@@ -17,6 +17,7 @@
 #include <zmk/2g4_crypto.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/dongle_link_state_changed.h>
+#include <zmk/events/dongle_battery_state_changed.h>
 
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 #include <zmk/hid_indicators_types.h>
@@ -202,6 +203,19 @@ static void process_rx_payload(const struct zmk_esb_payload *rx) {
             LOG_INF("Keyboard BOOT: reset_reason=0x%08x session=0x%08x", reason, session);
         } else {
             LOG_INF("Keyboard BOOT (truncated, dec_len=%d)", dec_len);
+        }
+        break;
+    }
+    case ZMK_2G4_MSG_BATTERY_REPORT: {
+        /* Format: [0x06][level_left][level_right][level_num] */
+        if (dec_len >= 4) {
+            for (uint8_t idx = 0; idx < 3; idx++) {
+                raise_zmk_dongle_battery_state_changed(
+                    (struct zmk_dongle_battery_state_changed){
+                        .device_index = idx,
+                        .level = buf[1 + idx],
+                    });
+            }
         }
         break;
     }
