@@ -5,6 +5,7 @@
  */
 
 #include <errno.h>
+#include <string.h>
 
 #include <zmk/stdlib.h>
 #include <zmk/split/transport/central.h>
@@ -249,6 +250,9 @@ static int transport_status_changed_cb(const struct zmk_split_transport_central 
 }
 
 static int central_init(void) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
+    memset(peripheral_battery_levels, 0xFF, sizeof(peripheral_battery_levels));
+#endif
     STRUCT_SECTION_FOREACH(zmk_split_transport_central, t) {
         if (!t->api->set_status_callback) {
             continue;
