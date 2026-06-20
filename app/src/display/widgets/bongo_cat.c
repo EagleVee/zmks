@@ -23,6 +23,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/display.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/wpm_state_changed.h>
+#include <zmk/events/keycode_state_changed.h>
 #include <zmk/wpm.h>
 
 #include <zmk/display/widgets/bongo_cat.h>
@@ -128,7 +129,17 @@ static void set_animation(lv_obj_t *animing, struct bongo_cat_state state) {
 }
 
 static struct bongo_cat_state get_state(const zmk_event_t *eh) {
-    return (struct bongo_cat_state){.wpm = zmk_wpm_get_state()};
+    uint8_t wpm = zmk_wpm_get_state();
+
+    /* If a key-press just arrived and the WPM timer hasn't ticked yet (still
+     * shows 0-4), pretend we are at the "slow" threshold so the cat reacts
+     * immediately rather than waiting up to 1 s for the WPM update. */
+    const struct zmk_keycode_state_changed *key_ev = as_zmk_keycode_state_changed(eh);
+    if (key_ev != NULL && key_ev->state && wpm < 5) {
+        wpm = 5;
+    }
+
+    return (struct bongo_cat_state){.wpm = wpm};
 }
 
 static void update_cb(struct bongo_cat_state state) {
@@ -140,6 +151,7 @@ static void update_cb(struct bongo_cat_state state) {
 
 ZMK_DISPLAY_WIDGET_LISTENER(widget_bongo_cat, struct bongo_cat_state, update_cb, get_state)
 ZMK_SUBSCRIPTION(widget_bongo_cat, zmk_wpm_state_changed);
+ZMK_SUBSCRIPTION(widget_bongo_cat, zmk_keycode_state_changed);
 
 int zmk_widget_bongo_cat_init(struct zmk_widget_bongo_cat *widget, lv_obj_t *parent) {
     widget->obj = lv_animimg_create(parent);
