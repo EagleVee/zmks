@@ -25,7 +25,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/wpm_state_changed.h>
 #include <zmk/wpm.h>
 
-#include "bongo_cat.h"
+#include <zmk/display/widgets/bongo_cat.h>
 
 #define SRC(array) (const void **)array, ARRAY_SIZE(array)
 
