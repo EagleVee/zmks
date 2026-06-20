@@ -45,6 +45,7 @@ config ZMK_WIDGET_DONGLE_LINK_STATUS
 config ZMK_WIDGET_BONGO_CAT
     bool "Bongo cat animation widget driven by WPM"
     depends on ZMK_WPM && ZMK_DISPLAY
+    select LV_USE_IMG
     select LV_USE_ANIMIMG
 
 config ZMK_WIDGET_DONGLE_BATTERY_STATUS
