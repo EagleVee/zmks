@@ -75,9 +75,9 @@ static int start_advertising(bool low_duty) {
 static bool low_duty_advertising = false;
 static bool enabled = false;
 
-/* When BLE stays disconnected longer than ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT the
+/* When BLE stays disconnected longer than ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS the
  * transport reports available=false so the selector can fall back to ESB.
- * ble_retry_work resets the flag after ZMK_SPLIT_BLE_RETRY_TIMEOUT so the
+ * ble_retry_work resets the flag after ZMK_SPLIT_BLE_RETRY_TIMEOUT_MS so the
  * selector can switch back to BLE if the central returns to BLE mode. */
 static bool ble_gave_up = false;
 
@@ -128,8 +128,16 @@ static void disconnected(struct bt_conn *conn, uint8_t reason) {
     if (enabled) {
         low_duty_advertising = false;
         k_work_submit(&advertising_work);
-        k_work_reschedule(&ble_give_up_work,
-                          K_SECONDS(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT));
+        /* An intentional disconnect from the central (it called bt_conn_disconnect
+         * with "remote user terminated", e.g. because it switched to dongle mode
+         * and disabled BLE) means BLE is gone for good — yield to ESB almost
+         * immediately instead of waiting out the full grace period.  Any other
+         * reason (range, interference) keeps the longer grace period so a brief
+         * blip does not bounce us off BLE. */
+        uint32_t give_up_ms = (reason == BT_HCI_ERR_REMOTE_USER_TERM_CONN)
+                                  ? CONFIG_ZMK_SPLIT_BLE_FAST_GIVE_UP_MS
+                                  : CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS;
+        k_work_reschedule(&ble_give_up_work, K_MSEC(give_up_ms));
     }
 }
 
@@ -171,6 +179,8 @@ bool zmk_split_bt_peripheral_is_connected(void) { return is_connected; }
 
 bool zmk_split_bt_peripheral_is_bonded(void) { return is_bonded; }
 
+bool zmk_split_bt_peripheral_gave_up(void) { return ble_gave_up; }
+
 static zmk_split_transport_peripheral_status_changed_cb_t transport_status_cb;
 
 static int
@@ -198,7 +208,7 @@ static int split_peripheral_bt_set_enabled(bool en) {
          * reconnected), restarting the timer would kick num off BLE 4 s later. */
         if (!is_connected) {
             k_work_reschedule(&ble_give_up_work,
-                              K_SECONDS(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT));
+                              K_MSEC(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS));
         }
         k_work_submit(&advertising_work);
         return 0;
@@ -236,7 +246,7 @@ static K_WORK_DEFINE(notify_status_work, notify_status_work_cb);
 
 static void ble_give_up_cb(struct k_work *work) {
     ble_gave_up = true;
-    k_work_reschedule(&ble_retry_work, K_SECONDS(CONFIG_ZMK_SPLIT_BLE_RETRY_TIMEOUT));
+    k_work_reschedule(&ble_retry_work, K_MSEC(CONFIG_ZMK_SPLIT_BLE_RETRY_TIMEOUT_MS));
     /* Fire the status event so ESB peripheral listener can schedule its own
      * availability timer.  This covers the case where BLE never connected
      * (no prior disconnected() callback) but the central is in dongle mode. */

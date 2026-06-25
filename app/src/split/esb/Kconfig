@@ -53,6 +53,15 @@ config ZMK_SPLIT_ESB_PIPE_OFFSET
       Pipe 0 is reserved for the dongle HID link.  Split peripheral pipes start
       at this offset (1 = pipe 1 for index 0, pipe 2 for index 1, …).
 
+config ZMK_SPLIT_ESB_AVAIL_MARGIN_MS
+    int "Milliseconds after BLE gives up before ESB becomes available"
+    default 200
+    help
+      Margin added on top of ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS before the ESB
+      transport reports available=true.  This ensures the selector has already
+      seen BLE go unavailable before ESB becomes a candidate, so the handoff is
+      ordered rather than racing.
+
 # ── Shared address config (must match on central AND all peripherals) ─────────
 
 config ZMK_SPLIT_ESB_ADDR_BASE_0

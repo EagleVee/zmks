@@ -37,6 +37,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE)
 #include <zmk/event_manager.h>
 #include <zmk/events/split_peripheral_status_changed.h>
+#include <zmk/split/bluetooth/peripheral.h>
 #endif
 
 BUILD_ASSERT(sizeof(struct zmk_split_transport_peripheral_event) <=
@@ -49,8 +50,8 @@ static bool enabled;
 static bool connected; /* true after a successful TX to the central */
 
 /* ESB starts unavailable.  It becomes available after BLE gives up
- * (ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT + 1 s), and goes back to unavailable
- * the moment BLE reconnects. */
+ * (ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS + ZMK_SPLIT_ESB_AVAIL_MARGIN_MS), and goes
+ * back to unavailable the moment BLE reconnects. */
 static bool esb_available = false;
 
 static struct zmk_esb_payload pending_payload;
@@ -238,9 +239,12 @@ static void esb_avail_work_cb(struct k_work *work) {
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE)
 /* When BLE connects: ESB is not needed — become unavailable.
- * When BLE gives up (ble_give_up_cb fires the event with connected=false):
- * schedule ESB availability 1 second after BLE's own give-up timeout so the
- * selector has time to see BLE unavailable before ESB becomes the candidate. */
+ * When BLE has actually given up (give-up timer elapsed, gave_up==true):
+ * schedule ESB availability a short margin later so the selector has time to
+ * see BLE unavailable before ESB becomes the candidate.  We gate on gave_up
+ * rather than the raw disconnect event so that a fast give-up (after an
+ * intentional central disconnect / mode switch) produces a correspondingly
+ * fast ESB handoff instead of always waiting a full give-up window. */
 static int esb_ble_status_listener(const zmk_event_t *eh) {
     const struct zmk_split_peripheral_status_changed *ev =
         as_zmk_split_peripheral_status_changed(eh);
@@ -250,15 +254,12 @@ static int esb_ble_status_listener(const zmk_event_t *eh) {
             esb_available = false;
             notify_status();
         }
-    } else {
+    } else if (zmk_split_bt_peripheral_gave_up()) {
         /* Only schedule if ESB is not already available and no timer is already
-         * queued.  ble_give_up_cb fires a second connected=false event at
-         * GIVE_UP_TIMEOUT seconds; without this guard it would reset the
-         * deadline from T+5 s (set by disconnected()) to T+9 s, delaying ESB
-         * availability by an extra 4 s and creating an enable/disable cycle. */
+         * queued, so the second connected=false event the give-up path may emit
+         * does not push the deadline out and create an enable/disable cycle. */
         if (!esb_available && !k_work_delayable_is_pending(&esb_avail_work)) {
-            k_work_reschedule(&esb_avail_work,
-                              K_MSEC((CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT + 1) * 1000));
+            k_work_reschedule(&esb_avail_work, K_MSEC(CONFIG_ZMK_SPLIT_ESB_AVAIL_MARGIN_MS));
         }
     }
     return ZMK_EV_EVENT_BUBBLE;

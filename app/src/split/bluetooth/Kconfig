@@ -100,23 +100,36 @@ config BT_MAX_CONN
 config BT_GAP_AUTO_UPDATE_CONN_PARAMS
     default n
 
-config ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT
-    int "Seconds after disconnect before BLE transport yields to fallback"
-    default 4
+config ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS
+    int "Milliseconds after disconnect before BLE transport yields to fallback"
+    default 1500
     help
       When the BLE link drops (or never connects) and this timer elapses the
       transport reports available=false so the selector can try the next
-      transport (e.g. ESB).  Resets immediately when BLE reconnects.
+      transport (e.g. ESB).  Resets immediately when BLE reconnects.  Keep this
+      long enough to ride out brief BLE blips without bouncing to ESB, but short
+      enough that a cold start in dongle mode finds ESB quickly.
 
-config ZMK_SPLIT_BLE_RETRY_TIMEOUT
-    int "Seconds between BLE retry attempts after the transport gave up"
-    default 3
+config ZMK_SPLIT_BLE_FAST_GIVE_UP_MS
+    int "Milliseconds before yielding to fallback after an intentional disconnect"
+    default 120
+    help
+      When the central deliberately drops the peripheral (HCI reason
+      "remote user terminated", e.g. it switched to dongle mode and disabled
+      BLE) the link is almost certainly gone for good, so there is no point
+      waiting out the full GIVE_UP_TIMEOUT.  This shorter timer lets the
+      peripheral fall back to ESB almost immediately on a mode switch.
+
+config ZMK_SPLIT_BLE_RETRY_TIMEOUT_MS
+    int "Milliseconds between BLE retry attempts after the transport gave up"
+    default 500
     help
       After giving up, the transport retries being available after this many
-      seconds.  This lets the selector fall back to BLE if the central later
-      returns to BLE mode.  Keep this shorter than ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT
-      so num cycles through BLE advertising windows frequently enough for the
-      left side to reconnect after a mode switch.
+      milliseconds.  This lets the selector fall back to BLE if the central
+      later returns to BLE mode.  Keep this shorter than
+      ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS so the peripheral cycles through BLE
+      advertising windows frequently enough for the left side to reconnect
+      after a mode switch.
 
 endif # !ZMK_SPLIT_ROLE_CENTRAL
 
