@@ -141,6 +141,13 @@ static int hub_enqueue(const struct zmk_esb_payload *payload) {
 /* ── PTX window work (PRX → PTX → send one item) ───────────────────────────── */
 
 static void ptx_window_work_cb(struct k_work *work) {
+    /* Bail if the hub has been torn down (e.g. a mode switch to BLE). A stale
+     * ESB event can still queue this work after zmk_2g4_stop(); re-initialising
+     * the radio here would collide with whatever stack now owns it. */
+    if (!ready) {
+        return;
+    }
+
     struct zmk_esb_payload payload;
     if (k_msgq_get(&ptx_msgq, &payload, K_NO_WAIT) != 0) {
         return; /* nothing to send */
@@ -176,6 +183,13 @@ static void ptx_window_work_cb(struct k_work *work) {
 /* ── PRX return work (PTX → PRX, called after TX_SUCCESS or giving up) ──────── */
 
 static void prx_return_work_cb(struct k_work *work) {
+    /* Bail if the hub has been torn down (e.g. a mode switch to BLE). A stale
+     * ESB event can still queue this work after zmk_2g4_stop(); re-initialising
+     * the radio here would collide with whatever stack now owns it. */
+    if (!ready) {
+        return;
+    }
+
     /* If more items queued, send the next one before switching back. */
     struct zmk_esb_payload payload;
     if (k_msgq_get(&ptx_msgq, &payload, K_NO_WAIT) == 0) {
@@ -521,8 +535,12 @@ int zmk_2g4_stop(void) {
     k_work_cancel_delayable(&battery_report_work);
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ESB)
-    k_work_cancel(&ptx_window_work);
-    k_work_cancel(&prx_return_work);
+    /* Cancel synchronously: if a hub callback is mid-flight on the workqueue we
+     * must wait for it to finish before disabling the radio below, otherwise it
+     * could re-init the radio after we tear it down. */
+    struct k_work_sync sync;
+    k_work_cancel_sync(&ptx_window_work, &sync);
+    k_work_cancel_sync(&prx_return_work, &sync);
     k_msgq_purge(&ptx_msgq);
     zmk_esb_split_central_set_available(false);
     hub_state = HUB_PRX;
