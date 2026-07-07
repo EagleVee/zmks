@@ -75,6 +75,20 @@ static int start_advertising(bool low_duty) {
 static bool low_duty_advertising = false;
 static bool enabled = false;
 
+/* When BLE stays disconnected longer than ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS the
+ * transport reports available=false and stops advertising; ble_retry_work then
+ * resets the flag after ZMK_SPLIT_BLE_RETRY_TIMEOUT_MS and restarts advertising
+ * from scratch (fresh high-duty directed window).  The two timers keep cycling
+ * until the central reconnects, so a stuck link recovers on its own.  On builds
+ * with a fallback transport the same available flag also lets the selector roam
+ * to that transport while BLE is in its gave-up window. */
+static bool ble_gave_up = false;
+
+static void ble_give_up_cb(struct k_work *work);
+static void ble_retry_cb(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(ble_give_up_work, ble_give_up_cb);
+static K_WORK_DELAYABLE_DEFINE(ble_retry_work, ble_retry_cb);
+
 static void advertising_cb(struct k_work *work) {
     const int err = start_advertising(low_duty_advertising);
     if (err < 0) {
@@ -86,6 +100,12 @@ K_WORK_DEFINE(advertising_work, advertising_cb);
 
 static void connected(struct bt_conn *conn, uint8_t err) {
     is_connected = (err == 0);
+
+    if (err == 0) {
+        k_work_cancel_delayable(&ble_give_up_work);
+        k_work_cancel_delayable(&ble_retry_work);
+        ble_gave_up = false;
+    }
 
     raise_zmk_split_peripheral_status_changed(
         (struct zmk_split_peripheral_status_changed){.connected = is_connected});
@@ -111,6 +131,16 @@ static void disconnected(struct bt_conn *conn, uint8_t reason) {
     if (enabled) {
         low_duty_advertising = false;
         k_work_submit(&advertising_work);
+        /* An intentional disconnect from the central (it called bt_conn_disconnect
+         * with "remote user terminated", e.g. it is rebooting or disabled BLE)
+         * means the link is gone for good — start the give-up/retry cycle almost
+         * immediately instead of waiting out the full grace period.  Any other
+         * reason (range, interference) keeps the longer grace period so a brief
+         * blip does not needlessly restart advertising. */
+        uint32_t give_up_ms = (reason == BT_HCI_ERR_REMOTE_USER_TERM_CONN)
+                                  ? CONFIG_ZMK_SPLIT_BLE_FAST_GIVE_UP_MS
+                                  : CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS;
+        k_work_reschedule(&ble_give_up_work, K_MSEC(give_up_ms));
     }
 }
 
@@ -152,6 +182,8 @@ bool zmk_split_bt_peripheral_is_connected(void) { return is_connected; }
 
 bool zmk_split_bt_peripheral_is_bonded(void) { return is_bonded; }
 
+bool zmk_split_bt_peripheral_gave_up(void) { return ble_gave_up; }
+
 static zmk_split_transport_peripheral_status_changed_cb_t transport_status_cb;
 
 static int
@@ -171,9 +203,25 @@ static int split_peripheral_bt_set_enabled(bool en) {
 
     enabled = en;
     if (en) {
+        ble_gave_up = false;
+        k_work_cancel_delayable(&ble_retry_work);
+        /* Only start the give-up timer when not already connected.
+         * If the selector calls set_enabled(true) while a BLE connection is
+         * alive, restarting the timer would kick the peripheral off a working
+         * link when it fires. */
+        if (!is_connected) {
+            k_work_reschedule(&ble_give_up_work,
+                              K_MSEC(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS));
+        }
         k_work_submit(&advertising_work);
         return 0;
     } else {
+        k_work_cancel_delayable(&ble_give_up_work);
+        /* Do NOT cancel ble_retry_work here.  If ble_gave_up=true when the
+         * selector disables BLE (switching to a fallback transport), the retry
+         * work is the only thing that will eventually reset ble_gave_up=false
+         * so BLE can be reconsidered.  Cancelling it here would lock BLE out
+         * permanently until the next hard reboot. */
         struct bt_conn *conn = NULL;
         bt_conn_foreach(BT_CONN_TYPE_LE, find_first_conn, &conn);
         if (conn) {
@@ -199,11 +247,46 @@ static void notify_status_work_cb(struct k_work *_work) { notify_transport_statu
 
 static K_WORK_DEFINE(notify_status_work, notify_status_work_cb);
 
+static void ble_give_up_cb(struct k_work *work) {
+    ble_gave_up = true;
+    k_work_reschedule(&ble_retry_work, K_MSEC(CONFIG_ZMK_SPLIT_BLE_RETRY_TIMEOUT_MS));
+    /* Stop advertising ourselves.  On a BLE-only build the selector has no
+     * fallback transport to switch to, so nothing else will call
+     * set_enabled(false) — without this the give-up/retry cycle would never
+     * actually touch the radio.  The retry below restarts advertising from
+     * scratch. */
+    const int err = bt_le_adv_stop();
+    if (err < 0) {
+        LOG_WRN("Failed to stop advertising (%d)", err);
+    }
+    /* Fire the status event so any fallback transport listener can schedule its
+     * own availability timer.  This covers the case where BLE never connected
+     * (no prior disconnected() callback). */
+    raise_zmk_split_peripheral_status_changed(
+        (struct zmk_split_peripheral_status_changed){.connected = false});
+    k_work_submit(&notify_status_work);
+}
+
+static void ble_retry_cb(struct k_work *work) {
+    ble_gave_up = false;
+    /* Restart advertising with a fresh high-duty directed window and re-arm the
+     * give-up timer so the cycle keeps running until the central reconnects.
+     * Skipped when the selector has disabled this transport (a fallback
+     * transport is active) or the link already came back. */
+    if (enabled && !is_connected) {
+        low_duty_advertising = false;
+        k_work_submit(&advertising_work);
+        k_work_reschedule(&ble_give_up_work, K_MSEC(CONFIG_ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS));
+    }
+    k_work_submit(&notify_status_work);
+}
+
 static bool settings_loaded = false;
 
 static struct zmk_split_transport_status split_peripheral_bt_get_status(void) {
     return (struct zmk_split_transport_status){
-        .available = !IS_ENABLED(CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START) && settings_loaded,
+        .available = !IS_ENABLED(CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START) && settings_loaded &&
+                     !ble_gave_up,
         .enabled = enabled,
         .connections = zmk_split_bt_peripheral_is_connected()
                            ? ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_ALL_CONNECTED

@@ -88,6 +88,20 @@ int zmk_split_peripheral_report_event(const struct zmk_split_transport_periphera
 }
 
 static int select_first_available_transport(void) {
+    // Stickiness: if the currently active transport is actually connected, keep
+    // it. Abandoning a working link to chase a higher-priority transport that
+    // merely became "available" again (e.g. the BLE retry timer firing while a
+    // fallback transport is connected) would drop the halves every retry
+    // interval. We only re-select once the active transport reports
+    // DISCONNECTED.
+    if (active_transport && active_transport->api->get_status) {
+        struct zmk_split_transport_status active_status = active_transport->api->get_status();
+        if (active_status.available &&
+            active_status.connections != ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED) {
+            return 0;
+        }
+    }
+
     // Transports are sorted by priority, so find the first
     // One that's available, and enable it. Any transport that
     // Doesn't support `get_status` is assumed to be always

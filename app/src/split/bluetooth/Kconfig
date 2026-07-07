@@ -100,6 +100,36 @@ config BT_MAX_CONN
 config BT_GAP_AUTO_UPDATE_CONN_PARAMS
     default n
 
+config ZMK_SPLIT_BLE_GIVE_UP_TIMEOUT_MS
+    int "Milliseconds after disconnect before BLE transport yields to fallback"
+    default 1500
+    help
+      When the BLE link drops (or never connects) and this timer elapses the
+      transport reports available=false so the selector can re-cycle it (or try
+      a fallback transport, if one is built in).  Resets immediately when BLE
+      reconnects.  Keep this long enough to ride out brief BLE blips without
+      needlessly restarting advertising.
+
+config ZMK_SPLIT_BLE_FAST_GIVE_UP_MS
+    int "Milliseconds before yielding to fallback after an intentional disconnect"
+    default 120
+    help
+      When the central deliberately drops the peripheral (HCI reason
+      "remote user terminated", e.g. it is rebooting or disabled BLE) the link
+      is almost certainly gone for good, so there is no point waiting out the
+      full GIVE_UP_TIMEOUT.  This shorter timer lets the peripheral start its
+      reconnect cycle almost immediately.
+
+config ZMK_SPLIT_BLE_RETRY_TIMEOUT_MS
+    int "Milliseconds between BLE retry attempts after the transport gave up"
+    default 500
+    help
+      After giving up, the transport reports itself available again after this
+      many milliseconds, which makes the selector re-enable it and restart
+      advertising from scratch.  Together with the give-up timer this cycles
+      the peripheral through fresh BLE advertising windows so the central gets
+      repeated chances to reconnect after a drop.
+
 endif # !ZMK_SPLIT_ROLE_CENTRAL
 
 endmenu
